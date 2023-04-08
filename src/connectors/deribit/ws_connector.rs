@@ -17,7 +17,7 @@ use log::{error, info, warn};
 use uuid::Uuid;
 use crate::connectors::deribit::protocol::*;
 use crate::strategy::order_manager;
-use crate::core::entities::{Command, OrderSide, PriceLevelAction, PriceLevelChange};
+use crate::core::entities::{Command, MarketEvent,  PriceLevelAction, PriceLevelChange};
 use crate::strategy::order_manager::{Balance, OrderStatus};
 use crate::core::entities::OrderbookUpdate;
 
@@ -44,6 +44,8 @@ impl DeribitConnector {
         thread::sleep_ms(1000);
 
         self.subscribe_to_channels(vec!("book.BTC-PERPETUAL.raw".into()));
+
+        self.subscribe_to_channels(vec!("trades.future.BTC.raw".into()));
 
         let command_receiver_clone = crossbeam_channel::Receiver::clone(&self.command_receiver);
 
@@ -154,6 +156,8 @@ impl DeribitConnector {
 
                                                         x if x.starts_with("trades.") => {
                                                             let trade: Trade = serde_json::from_value(data).unwrap();
+
+
                                                         }
                                                         x => warn!("Unexpected channel {}", x)
                                                     }
@@ -218,7 +222,7 @@ impl DeribitConnector {
         });
     }
 
-    pub fn new(orderbook_sender: Sender<OrderbookUpdate>,
+    pub fn new(market_event_sender: Sender<MarketEvent>,
                order_sender: Sender<order_manager::OrderEvent>,
                raw_data_sender: Sender<String>,
                command_receiver: Receiver<Command>,

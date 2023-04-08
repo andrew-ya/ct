@@ -23,7 +23,7 @@ fn main() {
 
     info!("Starting bot...");
 
-    let (orderbook_sender, orderbook_receiver) = bounded(10);
+    let (market_event_sender, market_event_receiver) = bounded(10);
     let (order_sender, order_receiver) = bounded(10);
     let (raw_data_sender, raw_data_receiver) = bounded(10);
     let (signal_sender, signal_receiver) = bounded(10);
@@ -34,7 +34,7 @@ fn main() {
     let command_sender_2 = command_sender.clone();
 
     let connector_handle = thread::spawn(move || {
-        let r = DeribitConnector::new(orderbook_sender, order_sender, raw_data_sender, command_receiver,  portfolio_sender, command_sender_2);
+        let r = DeribitConnector::new(market_event_sender, order_sender, raw_data_sender, command_receiver,  portfolio_sender, command_sender_2);
         r.run();
     });
 
@@ -44,7 +44,7 @@ fn main() {
     });
 
     let strategy_handle = thread::spawn(move || {
-        let strategy = strategy::mm::MarketMaker::new(orderbook_receiver, signal_sender);
+        let strategy = strategy::mm::MarketMaker::new(market_event_receiver, signal_sender);
         strategy.run();
     });
 

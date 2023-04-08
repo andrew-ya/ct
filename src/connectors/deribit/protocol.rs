@@ -2,6 +2,8 @@ use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use rust_decimal::Decimal;
 use uuid::Uuid;
+use crate::core::entities;
+
 
 
 #[derive(Serialize, Deserialize)]
@@ -277,6 +279,32 @@ pub struct Trade {
     timestamp: i64,
     trade_id: String,
     trade_seq: i64
+}
+
+impl Trade {
+    fn to_core_entity(&self) -> entities::Trade {
+
+        let direction = match self.direction {
+            Direction::Buy=> entities::TradeDirection::Bid,
+            Direction::Sell=> entities::TradeDirection::Ask,
+        };
+
+        entities::Trade::new(
+            self.amount,
+            self.block_trade_id,
+            self.direction,
+            self.index_price,
+            self.instrument_name,
+            self.iv,
+            self.liquidation,
+            self.mark_price,
+            self.price,
+            self.tick_direction,
+            self.timestamp,
+            self.trade_id,
+            self.trade_seq
+        )
+    }
 }
 
 #[cfg(test)]

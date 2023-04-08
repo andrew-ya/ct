@@ -4,20 +4,21 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use crate::core::entities::OrderbookUpdate;
+use crate::core::entities::{MarketEvent, OrderbookUpdate};
+use crate::core::entities::MarketEvent::{OrderBookUpdateEvent, TradeEvent};
 use crate::orderbook::TreeOrderBook;
 use crate::strategy::order_manager::OrderPosition;
 
 pub struct MarketMaker {
-    orderbook_receiver: Receiver<OrderbookUpdate>,
+    market_event_receiver: Receiver<MarketEvent>,
     signal_sender: Sender<OrderPosition>,
 }
 
 impl MarketMaker {
-    pub fn new(orderbook_receiver: Receiver<OrderbookUpdate>,
+    pub fn new(market_event_receiver: Receiver<MarketEvent>,
                signal_sender: Sender<OrderPosition>) -> MarketMaker {
         MarketMaker {
-            orderbook_receiver,
+            market_event_receiver,
             signal_sender,
         }
     }
@@ -28,25 +29,38 @@ impl MarketMaker {
         thread::scope(|s| {
             s.spawn(move || {
 
-                let mut orderbook_iter = self.orderbook_receiver.iter();
+                let mut market_event_iter = self.market_event_receiver.iter();
                 loop {
 
-                    let orderbook_update = orderbook_iter.next().unwrap();
+                    let market_event = market_event_iter.next().unwrap();
 
-                    orderbook.add_bids(orderbook_update.bids);
-                    orderbook.add_asks(orderbook_update.asks);
+                    match market_event {
+                        OrderBookUpdateEvent(update) => {
+
+                            let orderbook_update = *update;
+
+                            orderbook.add_bids(orderbook_update.bids);
+                            orderbook.add_asks(orderbook_update.asks);
 
 
-                    let bid_price = Decimal::from_f64_retain((orderbook.get_nth_bid(2).unwrap().0 + orderbook.get_nth_bid(3).unwrap().0).to_f64().unwrap() / 2.0).unwrap();
-                    let ask_price = Decimal::from_f64_retain((orderbook.get_nth_ask(2).unwrap().0 + orderbook.get_nth_ask(3).unwrap().0).to_f64().unwrap() / 2.0).unwrap();
+                            let bid_price = Decimal::from_f64_retain((orderbook.get_nth_bid(2).unwrap().0 + orderbook.get_nth_bid(3).unwrap().0).to_f64().unwrap() / 2.0).unwrap();
+                            let ask_price = Decimal::from_f64_retain((orderbook.get_nth_ask(2).unwrap().0 + orderbook.get_nth_ask(3).unwrap().0).to_f64().unwrap() / 2.0).unwrap();
 
 
-                    let signal = OrderPosition {
-                        bid: bid_price,
-                        ask: ask_price
-                    };
+                            let signal = OrderPosition {
+                                bid: bid_price,
+                                ask: ask_price
+                            };
 
-                    self.signal_sender.send(signal).unwrap();
+                            self.signal_sender.send(signal).unwrap();
+                        },
+
+                        TradeEvent(trade) => {
+
+                        }
+                    }
+
+
                 }
             });
         });

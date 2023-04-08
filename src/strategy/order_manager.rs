@@ -7,75 +7,25 @@ use crossbeam_channel::{Receiver, Sender};
 use log::{error, info, warn};
 use uuid::Uuid;
 
-use crate::core::entities::{Command, OrderSide};
+use crate::core::entities::{Balance, Command, Order, OrderChanged, OrderEvent, OrderPosition, OrderStatus, OrderSuccess, TradeDirection};
+use crate::core::entities::OrderEvent::{OrderChangedEvent, OrderSuccessEvent};
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum TradeDirection {
-    Bid,
-    Ask,
-}
-
-#[derive(Debug)]
-pub struct OrderPosition {
-    pub bid: Decimal,
-    pub ask: Decimal,
-}
-
-
-#[derive(Debug)]
-pub enum OrderStatus {
-    Open,
-    Filled,
-    Rejected,
-    Cancelled,
-    Untriggered,
-}
-
-#[derive(Debug)]
-pub enum OrderEvent {
-    OrderChanged {
-        id: String,
-        direction: TradeDirection,
-        price: Decimal,
-        amount: Decimal,
-        status: OrderStatus,
-        label: String,
-    },
-    OrderSuccess {
-        uuid: Uuid,
-    },
-}
-
-#[derive(Debug)]
-pub struct Order {
-    id: String,
-    direction: TradeDirection,
-    price: Decimal,
-    amount: Decimal,
-    status: OrderStatus,
-    label: String,
-}
-
-
-pub struct Balance {
-    pub(crate) balance: Decimal
-}
 
 pub struct Manager {
     signal_receiver: Receiver<OrderPosition>,
-    orders_receiver: Receiver<OrderEvent>,
+    order_receiver: Receiver<OrderEvent>,
     portfolio_receiver: Receiver<Balance>,
     command_sender: Sender<Command>,
 }
 
 impl Manager {
     pub fn new(signal_receiver: Receiver<OrderPosition>,
-               orders_receiver: Receiver<OrderEvent>,
+               order_receiver: Receiver<OrderEvent>,
                portfolio_receiver: Receiver<Balance>,
                command_sender: Sender<Command>) -> Manager {
         Manager {
             signal_receiver,
-            orders_receiver,
+            order_receiver,
             portfolio_receiver,
             command_sender,
         }
@@ -102,7 +52,7 @@ impl Manager {
         let uo1 = Arc::clone(&unconfirmed_orders);
 
 
-        let order_receiver_clone = crossbeam_channel::Receiver::clone(&self.orders_receiver); //
+        let order_receiver_clone = crossbeam_channel::Receiver::clone(&self.order_receiver); //
         let portfolio_receiver_clone = self.portfolio_receiver.clone(); //
         let signal_receiver_clone = self.signal_receiver.clone(); //
         let command_sender_clone = crossbeam_channel::Sender::clone(&self.command_sender.clone());
@@ -110,19 +60,23 @@ impl Manager {
         thread::spawn(move || { // update orders
             let mut orders = order_receiver_clone.iter();
             loop {
-                let order_response = orders.next().unwrap();
+                let order_event = orders.next().unwrap();
 
-                info!("Got order update: {:?}", &order_response);
+                info!("Got order event: {:?}", &order_event);
 
-                match order_response {
-                    OrderEvent::OrderChanged { id, direction, price, amount, status, label } => {
+                match order_event {
+                    OrderChanged(changed) => {
+
+                        // { id, direction, price, amount, status, label }
+                        let order_changed = *changed;
+
                         let mut existed_orders = ao1.lock().unwrap();
 
-                        match (*existed_orders).get(id.as_str()) {
+                        match (*existed_orders).get(order_changed.id.as_str()) {
                             Some(ord) => {
                                 match status {
                                     OrderStatus::Filled | OrderStatus::Cancelled => {
-                                        (*existed_orders).remove(id.as_str());
+                                        (*existed_orders).remove(order_changed.id.as_str());
                                     }
                                     smth_else => {
                                         warn!("Got incorrect order state for existed order: {:?}, {:?}", smth_else, ord);
@@ -130,20 +84,20 @@ impl Manager {
                                 }
                             }
                             None => {
-                                match status {
+                                match order_changed.status {
                                     OrderStatus::Open => {
-                                        let order_label = label.clone();
+                                        let order_label = order_changed.label.clone();
 
-                                        let order = Order {
-                                            id: id.clone(),
-                                            direction,
-                                            price,
-                                            amount,
-                                            status,
-                                            label,
-                                        };
+                                        let order = Order::new(
+                                            order_changed.id.clone(),
+                                            order_changed.direction,
+                                            order_changed.price,
+                                            order_changed.amount,
+                                            order_changed.status,
+                                            order_changed.label,
+                                        );
 
-                                        (*existed_orders).insert(id, order);
+                                        (*existed_orders).insert(order_changed.id, order);
                                         let current_timestamp = SystemTime::now()
                                             .duration_since(UNIX_EPOCH)
                                             .unwrap()
@@ -163,10 +117,10 @@ impl Manager {
                         info!("existed orders: {:?}", &existed_orders);
                     }
 
-                    OrderEvent::OrderSuccess { uuid } => {
+                    OrderSuccessEvent(success) => {
                         let mut unconfirmed = unconfirmed_orders.lock().unwrap();
-                        if (*unconfirmed).contains(&uuid) {
-                            (*unconfirmed).remove(&uuid);
+                        if (*unconfirmed).contains(&(*success).uuid) {
+                            (*unconfirmed).remove(&(*success).uuid);
                         };
                     }
                 }
